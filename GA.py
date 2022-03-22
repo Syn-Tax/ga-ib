@@ -4,7 +4,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import statistics
 import math
-# import wandb
+
+#############################################
+######                              #########
+######       DISTANCES MATRIX       #########
+######                              #########
+#############################################
 
 distances_large =  [[0,   94,  76,  141, 91,  60,  120, 145, 91,  74,  90,  55,  145, 108, 41,  49,  33,  151, 69,  111, 24  ],
                     [94,  0,   156, 231, 64,  93,  108, 68,  37,  150, 130, 57,  233, 26,  62,  140, 61,  229, 120, 57,  109 ],
@@ -28,13 +33,21 @@ distances_large =  [[0,   94,  76,  141, 91,  60,  120, 145, 91,  74,  90,  55, 
                     [111, 57,  185, 251, 26,  75,  163, 39,  93,  140, 101, 101, 226, 81,  69,  159, 86,  211, 161, 0,   115 ],
                     [24,  109, 84,  137, 92,  49,  144, 152, 112, 50,  71,  78,  125, 127, 49,  50,  52,  128, 90,  115, 0   ]]
 
+# Distance matrix of different sizes
+
 distances_small = [i[:8] for i in distances_large[:8]]
 
 distances_medium = [i[:15] for i in distances_large[:15]]
 
 distances = distances_medium
 
-example_tour = range(len(distances[0]))[1::]
+example_tour = list(range(len(distances[0])))[1::]
+
+#############################################
+######                              #########
+######       INDIVIDUAL CLASS       #########
+######                              #########
+#############################################
 
 class Individual:
   def __init__(self, tour=None):
@@ -42,11 +55,14 @@ class Individual:
       self.tour = tour
     else:
       self.tour = random.sample(example_tour, len(example_tour))
-    self.fitness = 9e99
+    self.fitness = 9e99 # initialise fitness at some high value
     self.probability = 0
 
-  def evaluate(self, func):
-    self.fitness = func([0] + self.tour + [0])
+  def evaluate(self, func, closed=True):
+    if closed:
+      self.fitness = func([0] + self.tour + [0])
+    else:
+      self.fitness = func([0] + self.tour)
   
   def mutate(self, mutation_rate=1e-3):
     for i in range(len(self.tour)):
@@ -55,7 +71,13 @@ class Individual:
         self.tour[i], self.tour[swap] = self.tour[swap], self.tour[i]
 
 
-def calculate_distance(tour):
+#############################################
+######                              #########
+######       UTIL FUNCTIONS         #########
+######                              #########
+#############################################
+
+def calculate_distance(tour): # fitness function, fitness = 1/tour length
   total = 0
   for i in range(len(tour)-1):
     total += distances[tour[i]][tour[i+1]]
@@ -63,6 +85,13 @@ def calculate_distance(tour):
 
 def initialise_population(pop_size):
   return [Individual() for _ in range(pop_size)]
+
+
+#############################################
+######                              #########
+######       SELECTION METHODS      #########
+######                              #########
+#############################################
 
 def truncation_selection(pop, truncation_factor=0.5):
   return sorted(pop, key=lambda x : x.fitness, reverse=True)[:int(len(pop)*truncation_factor+1)]
@@ -150,6 +179,12 @@ def stochastic_universal_sampling(population, size, wheel=None):
 
   return chosen
 
+#############################################
+######                              #########
+######     CROSSOVER METHODS        #########
+######                              #########
+#############################################
+
 def order_crossover(parent1, parent2):
   p1, p2 = parent1.tour, parent2.tour
   i = random.randint(0, int(len(p1)/2)-1)
@@ -227,43 +262,67 @@ def cycle_crossover(parent1, parent2, fill_in=True, random=False):
 
   return f1
 
+#############################################
+######                              #########
+######       MAIN FUNCTION          #########
+######                              #########
+#############################################
+
 def main():
+  # Main hyperparameters
   GENERATIONS = 200
   POP_SIZE = 1000
 
+  # TSP parameters
+  IS_CLOSED = True # generate a closed loop
+
+  # Truncation selection parameters
   TRUNCATION_FACTOR = 0.5
 
+  # Tournament selection parameters
   TOURNAMENT_PROBABILITY = 1
   TOURNAMENT_SIZE = 5
   TOURNAMENT_NUMBER = int(3*(POP_SIZE/TOURNAMENT_SIZE))
 
+  # Roulette wheel selection parameters
   ROULETTE_WHEEL_SIZE = int(POP_SIZE/2)
 
+  # Stochastic universal sampling parameters
   SUS_SIZE = int(POP_SIZE/2)
 
+  # Parameter to allow for near-convergence, difference between average tour length and minimum tour length when the model is considered converged
   CONVERGENCE_PARAM = 0
 
+  # Mutation parameters
   INIT_MUTATION_RATE = 1e-3
+
+  # Mutation decap parameters
   MUTATION_RATE = INIT_MUTATION_RATE
   MUTATION_DECAY = False
   MUTATION_DECAY_RATE = 1e-6
 
+  # Add two random individuals in every generation, if false, these individuals are created using the crossover method
   ADD_RANDOM = True
 
+  # crossover method (one of the functions defined above)
   CROSSOVER = cycle_crossover
 
+  # initialise population
   population = initialise_population(POP_SIZE)
+
+  # initialise logging lists
   best_individuals = []
   avg_fitness = []
   stddev = []
 
-  # wandb.init(project="genetic-algorithm")
+  # variable that allows the model to continue for one generation after convergence is detected
   break_next = False
 
   for generation in range(GENERATIONS):
   # while not break_next:
-    [i.evaluate(calculate_distance) for i in population]
+    [i.evaluate(calculate_distance, closed=IS_CLOSED) for i in population]
 
+    ## LOG DATA
     min_distance = int(min([1/i.fitness for i in population]))
     avg_distance = int(sum([1/i.fitness for i in population])/len(population))
     stddev_pop = statistics.pstdev([1/i.fitness for i in population])
@@ -273,13 +332,13 @@ def main():
     avg_fitness.append(avg_distance)
     stddev.append(stddev_pop)
 
-    # wandb.log({"min distance": min_distance, "avg distance": avg_distance, "std dev": stddev_pop})
-
     if break_next:
       break
 
     if abs(min_distance-avg_distance) <= CONVERGENCE_PARAM:
       break_next = True
+
+    ## CHOOSE THE SELECTION METHOD
 
     # mating_pool = truncation_selection(population, truncation_factor=TRUNCATION_FACTOR) # TRUNCATION SELECTION
     mating_pool = tournament_selection(population, TOURNAMENT_NUMBER, TOURNAMENT_PROBABILITY, TOURNAMENT_SIZE) # TOURNAMENT SELECTION
@@ -290,6 +349,7 @@ def main():
 
     new_population = []
 
+    # PERFORM CROSSOVER
     for i in range(len(mating_pool)-1):
       new_population.append(Individual(tour=CROSSOVER(mating_pool[i], mating_pool[i+1])))
       new_population.append(Individual(tour=CROSSOVER(mating_pool[i+1], mating_pool[i])))
@@ -303,6 +363,8 @@ def main():
     
     if len(new_population) > POP_SIZE:
       new_population = new_population[:POP_SIZE]
+
+    random.shuffle(new_population)
     
     if MUTATION_DECAY:
       MUTATION_RATE = INIT_MUTATION_RATE*math.exp(-MUTATION_DECAY_RATE*generation)
@@ -312,10 +374,15 @@ def main():
     population = new_population
 
 
-  [i.evaluate(calculate_distance) for i in population]
+  [i.evaluate(calculate_distance, closed=IS_CLOSED) for i in population]
+
+  ## FIND PATH USING SIMULATED ANNEALING
 
   distance_matrix = np.array(distances)
   best_tour, best_dist = solve_tsp_simulated_annealing(distance_matrix)
+
+  ## SHOW GRAPH USING MATPLOTLIB
+
   print(f"{best_tour}: {best_dist}")
   print(int(1/calculate_distance(best_tour + [0])))
   plt.plot(best_individuals)
@@ -325,10 +392,3 @@ def main():
 
 if __name__ == "__main__":
   main()
-
-# parent1 = Individual()
-# parent2 = Individual()
-# print(parent1.tour)
-# print(parent2.tour)
-
-# cycle_crossover(parent1, parent2, fill_in=False)
