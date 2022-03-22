@@ -1,0 +1,3 @@
+python-tsp
+numpy
+matplotlib
